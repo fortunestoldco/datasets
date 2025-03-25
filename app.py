@@ -284,29 +284,40 @@ dataset = load_dataset("path/to/dataset")
                 org = g.get_organization(org_name)
                 
                 # Get repositories
-                repos = list(org.get_repos())
-                
-                # Check if there are any repositories
-                if not repos:
-                    return False, "No repositories found in the organization"
-                
-                if max_repos:
-                    try:
-                        max_repos_int = int(max_repos)
-                        repos = repos[:max_repos_int]
-                    except (ValueError, TypeError):
-                        return False, "Invalid 'max_repos' value, must be a positive integer"
-                
-                total_repos = len(repos)
-                
-                # Process each repository
-                with ThreadPoolExecutor() as executor:
-                    futures = []
-                    for i, repo in enumerate(repos):
-                        futures.append(executor.submit(self.process_repository, repo, i, total_repos, progress))
+                try:
+                    # Use pagination to avoid memory issues and potential list index errors
+                    repos = []
+                    for repo in org.get_repos():
+                        repos.append(repo)
+                        
+                    # Check if there are any repositories
+                    if not repos:
+                        return False, "No repositories found in the organization"
                     
-                    for future in as_completed(futures):
-                        future.result()
+                    if max_repos:
+                        try:
+                            max_repos_int = int(max_repos)
+                            repos = repos[:max_repos_int]
+                        except (ValueError, TypeError):
+                            return False, "Invalid 'max_repos' value, must be a positive integer"
+                    
+                    total_repos = len(repos)
+                    
+                    # Process each repository
+                    with ThreadPoolExecutor() as executor:
+                        futures = []
+                        for i, repo in enumerate(repos):
+                            futures.append(executor.submit(self.process_repository, repo, i, total_repos, progress))
+                        
+                        # Improved error handling for futures
+                        for future in as_completed(futures):
+                            try:
+                                future.result()
+                            except Exception as e:
+                                logging.error(f"Error in worker thread: {str(e)}")
+                                # Don't immediately fail, continue processing other repos
+                except Exception as e:
+                    return False, f"Error listing repositories: {str(e)}"
                 
                 # Create CSV files and other metadata
                 if progress:
@@ -344,9 +355,8 @@ dataset = load_dataset("path/to/dataset")
                 return False, f"GitHub API error: {str(e)}"
             
         except Exception as e:
-            if "list index out of range" in str(e):
-                return False, "Error: list index out of range"
-            return False, f"Error: {str(e)}"
+            logging.error(f"Unexpected error: {str(e)}", exc_info=True)
+            return False, f"An unexpected error occurred: {str(e)}"
         finally:
             # Clean up temporary files, but keep the zip
             pass
@@ -435,9 +445,7 @@ def generate_dataset(org_url, github_token, max_repos, progress=gr.Progress()):
         # Return the path to the zip file
         return result
     else:
-        if "list index out of range" in result:
-            return "Error: list index out of range"
-        # Return the error message
+        # Always raise errors rather than returning strings
         raise gr.Error(result)
 
 def validate_github_url(url):
