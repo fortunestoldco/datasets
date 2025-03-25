@@ -127,14 +127,16 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
         self.config = config.copy()
         # Store repositories as regular list instead of reactive
         self._repositories = list(self.config['repositories'])
+        self._filtered_repositories = list(self._repositories)
 
     def compose(self) -> ComposeResult:
         with Container(id="repositories-container"):
             yield Label("Manage Repositories", id="title", classes="title")
+            yield Input(placeholder="Search repositories...", id="search-bar")
             yield Label("Select repositories to process:")
             # Initialize ListView with current repositories
             yield ListView(
-                *[ListItem(Label(repo['name'])) for repo in self._repositories],
+                *[ListItem(Label(f"{repo['name']} ({repo['type']}, {repo['source']}, {repo['num_files']} files)")) for repo in self._filtered_repositories],
                 id="repo-list"
             )
             with Horizontal(id="buttons"):
@@ -148,9 +150,18 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
         repo_list = self.query_one("#repo-list", ListView)
         repo_list.clear()
         # Add all current repositories to ListView
-        for repo in self._repositories:
-            repo_list.append(ListItem(Label(repo['name'])))
+        for repo in self._filtered_repositories:
+            repo_list.append(ListItem(Label(f"{repo['name']} ({repo['type']}, {repo['source']}, {repo['num_files']} files)")))
         self.refresh(repaint=True)
+
+    def filter_repositories(self, query: str) -> None:
+        """Filter repositories based on the search query"""
+        self._filtered_repositories = [repo for repo in self._repositories if query.lower() in repo['name'].lower() or query.lower() in repo['type'].lower()]
+        self.update_repo_list()
+
+    @on(Input.Changed, "#search-bar")
+    def on_search_bar_changed(self, event: Input.Changed) -> None:
+        self.filter_repositories(event.value)
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "add":
@@ -164,7 +175,9 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
                     # Add to internal list
                     self._repositories.append({
                         "name": repo_name,
-                        "type": "repository" if "/" in repo_name else "organization"
+                        "type": "repository" if "/" in repo_name else "organization",
+                        "source": "github" if "github.com" in repo_name else "huggingface",
+                        "num_files": 0  # Placeholder for number of files
                     })
                     # Update ListView
                     self.update_repo_list()
