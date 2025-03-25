@@ -83,7 +83,12 @@ class GithubOrgDatasetGenerator:
     def process_file(self, repo, file_path, target_dir, module_name, category):
         """Process and save a file"""
         try:
+            logging.info(f"Processing file: {file_path}")
             file_content = repo.get_contents(file_path).decoded_content.decode('utf-8', errors='replace')
+            
+            if not file_content:
+                logging.error(f"File content is empty: {file_path}")
+                return False
             
             # Extract file extension and name
             _, ext = os.path.splitext(file_path)
@@ -138,6 +143,9 @@ class GithubOrgDatasetGenerator:
             })
             
             return True
+        except FileNotFoundError as e:
+            logging.error(f"File not found: {file_path} - {str(e)}")
+            return False
         except Exception as e:
             logging.error(f"Error processing file {file_path}: {str(e)}")
             return False
@@ -549,4 +557,4 @@ with gr.Blocks(title="GitHub Organization Dataset Generator") as app:
     clean_temp_files()
 
 if __name__ == "__main__":
-    app.launch()
+    app.launch(share=True)
