@@ -141,6 +141,9 @@ class GithubOrgDatasetGenerator:
         try:
             contents = repo.get_contents(dir_path)
             
+            if not contents:
+                return False
+            
             for content in contents:
                 if content.type == "dir":
                     # Create subdirectory with same category
@@ -165,6 +168,9 @@ class GithubOrgDatasetGenerator:
         
         train_data = []
         test_data = []
+        
+        if not self.metadata["files"]:
+            return False
         
         # Split data: 80% train, 20% test
         for i, file_info in enumerate(self.metadata["files"]):
