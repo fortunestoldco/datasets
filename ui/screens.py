@@ -156,7 +156,7 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
 
     def filter_repositories(self, query: str) -> None:
         """Filter repositories based on the search query"""
-        self._filtered_repositories = [repo for repo in self._repositories if query.lower() in repo['name'].lower() or query.lower() in repo['type'].lower()]
+        self._filtered_repositories = [repo for repo in self._repositories if query.lower() in repo['name'].lower() or query.lower() in repo['type'].lower() or query.lower() in repo['source'].lower()]
         self.update_repo_list()
 
     @on(Input.Changed, "#search-bar")
@@ -185,7 +185,7 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
         elif event.button.id == "remove":
             repo_list = self.query_one("#repo-list", ListView)
             selected = repo_list.index
-            if selected is not None and 0 <= selected < len(self._repositories):
+            if selected is not None and 0 <= selected < len(self._filtered_repositories):
                 # Remove from internal list
                 del self._repositories[selected]
                 # Update ListView
