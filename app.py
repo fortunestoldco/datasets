@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 # Try importing required libraries, install if missing
 REQUIRED_LIBRARIES = [
     "huggingface_hub", "datasets", "nbformat", "nbconvert", 
-    "gitpython", "tqdm", "prompt_toolkit"
+    "gitpython", "tqdm", "textual"
 ]
 
 try:
@@ -62,10 +62,12 @@ try:
     import git
     from tqdm import tqdm
     from tqdm.contrib.concurrent import process_map
-    from prompt_toolkit import prompt
-    from prompt_toolkit.shortcuts import checkboxlist_dialog, radiolist_dialog, input_dialog, message_dialog
-    from prompt_toolkit.formatted_text import HTML
-    from prompt_toolkit.styles import Style
+    from textual.app import App
+    from textual.widgets import Button, Input, Label, ListView, ListItem, Header, Footer, ScrollView
+    from textual.reactive import Reactive
+    from textual import events
+    from textual.widget import Widget
+    from textual.views import GridView
 except ImportError as e:
     missing_lib = str(e).split("'")[1]
     logger.error(f"Required library {missing_lib} not found. Installing required libraries...")
@@ -86,22 +88,24 @@ except ImportError as e:
     import git
     from tqdm import tqdm
     from tqdm.contrib.concurrent import process_map
-    from prompt_toolkit import prompt
-    from prompt_toolkit.shortcuts import checkboxlist_dialog, radiolist_dialog, input_dialog, message_dialog
-    from prompt_toolkit.formatted_text import HTML
-    from prompt_toolkit.styles import Style
+    from textual.app import App
+    from textual.widgets import Button, Input, Label, ListView, ListItem, Header, Footer, ScrollView
+    from textual.reactive import Reactive
+    from textual import events
+    from textual.widget import Widget
+    from textual.views import GridView
 
 # Configuration file path
 CONFIG_FILE = os.path.expanduser("~/.doc_downloader_config.json")
 
 # Define TUI styles
-STYLE = Style.from_dict({
-    'dialog': 'bg:#007733 #ffffff',
-    'dialog.body': 'bg:#007733 #ffffff',
-    'dialog.frame.label': 'bg:#003300 #ffffff',
-    'dialog.body label': '#ffffff',
-    'dialog shadow': 'bg:#003300',
-})
+STYLE = {
+    "dialog": "bg:#007733 #ffffff",
+    "dialog.body": "bg:#007733 #ffffff",
+    "dialog.frame.label": "bg:#003300 #ffffff",
+    "dialog.body label": "#ffffff",
+    "dialog shadow": "bg:#003300",
+}
 
 # Utility functions for document filtering and schema standardization
 def is_documentation_file(file_path: str, content: str = None) -> bool:
@@ -240,275 +244,128 @@ def save_config(config: Dict[str, Any]) -> None:
         logger.error(f"Error saving configuration file: {str(e)}")
 
 # TUI Functions
+class ManageCredentialsApp(App):
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__()
+        self.config = config
+
+    async def on_mount(self) -> None:
+        self.body = ScrollView()
+        await self.view.dock(Header(), edge="top")
+        await self.view.dock(Footer(), edge="bottom")
+        await self.view.dock(self.body, edge="left")
+
+        self.github_token_input = Input(value=self.config['github_token'], placeholder="GitHub Token")
+        self.huggingface_token_input = Input(value=self.config['huggingface_token'], placeholder="Hugging Face Token")
+        self.save_button = Button(label="Save", name="save")
+
+        await self.body.update(
+            GridView(
+                Label("Manage Credentials"),
+                self.github_token_input,
+                self.huggingface_token_input,
+                self.save_button,
+                name="credentials_grid"
+            )
+        )
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.name == "save":
+            self.config['github_token'] = self.github_token_input.value
+            self.config['huggingface_token'] = self.huggingface_token_input.value
+            save_config(self.config)
+            await self.shutdown()
+
 def manage_credentials(config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Manage GitHub and Hugging Face credentials through TUI.
-    
-    Args:
-        config (Dict[str, Any]): Current configuration
-        
-    Returns:
-        Dict[str, Any]: Updated configuration
-    """
-    while True:
-        # Display current tokens (masked)
-        github_token_display = "********" if config['github_token'] else "[Not set]"
-        huggingface_token_display = "********" if config['huggingface_token'] else "[Not set]"
-        
-        choice = radiolist_dialog(
-            title="Manage Credentials",
-            text="Select an option:",
-            values=[
-                ("github", f"GitHub Token ({github_token_display})"),
-                ("huggingface", f"Hugging Face Token ({huggingface_token_display})"),
-                ("back", "Go Back")
-            ],
-            style=STYLE
-        ).run()
-        
-        if choice == "github":
-            token = prompt("Enter your GitHub token (leave empty to keep existing): ", 
-                           is_password=True)
-            if token:
-                config['github_token'] = token
-                save_config(config)
-                tqdm.write("GitHub token updated successfully.")
-        
-        elif choice == "huggingface":
-            token = prompt("Enter your Hugging Face token (leave empty to keep existing): ", 
-                           is_password=True)
-            if token:
-                config['huggingface_token'] = token
-                save_config(config)
-                tqdm.write("Hugging Face token updated successfully.")
-        
-        elif choice == "back" or choice is None:
-            break
-    
+    app = ManageCredentialsApp(config)
+    app.run()
     return config
+
+class ManageRepositoriesApp(App):
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__()
+        self.config = config
+
+    async def on_mount(self) -> None:
+        self.body = ScrollView()
+        await self.view.dock(Header(), edge="top")
+        await self.view.dock(Footer(), edge="bottom")
+        await self.view.dock(self.body, edge="left")
+
+        self.repo_list = ListView()
+        for repo in self.config['repositories']:
+            self.repo_list.append(ListItem(Label(repo['name'])))
+
+        self.add_button = Button(label="Add Repository", name="add")
+        self.remove_button = Button(label="Remove Repository", name="remove")
+        self.save_button = Button(label="Save", name="save")
+
+        await self.body.update(
+            GridView(
+                Label("Manage Repositories"),
+                self.repo_list,
+                self.add_button,
+                self.remove_button,
+                self.save_button,
+                name="repositories_grid"
+            )
+        )
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.name == "add":
+            repo_name = await self.prompt("Enter repository name:")
+            if repo_name:
+                self.config['repositories'].append({"name": repo_name})
+                self.repo_list.append(ListItem(Label(repo_name)))
+        elif event.button.name == "remove":
+            selected = self.repo_list.index
+            if selected is not None:
+                del self.config['repositories'][selected]
+                self.repo_list.remove(selected)
+        elif event.button.name == "save":
+            save_config(self.config)
+            await self.shutdown()
 
 def manage_repositories(config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Manage list of repositories through TUI.
-    
-    Args:
-        config (Dict[str, Any]): Current configuration
-        
-    Returns:
-        Dict[str, Any]: Updated configuration
-    """
-    while True:
-        choice = radiolist_dialog(
-            title="Manage Repositories",
-            text="Select an option:",
-            values=[
-                ("add", "Add Repository"),
-                ("remove", "Remove Repository"),
-                ("list", "List Repositories"),
-                ("back", "Go Back")
-            ],
-            style=STYLE
-        ).run()
-        
-        if choice == "add":
-            repo_type = radiolist_dialog(
-                title="Repository Type",
-                text="Select repository type:",
-                values=[
-                    ("org", "Organization (All Repositories)"),
-                    ("repo", "Single Repository")
-                ],
-                style=STYLE
-            ).run()
-            
-            if repo_type == "org":
-                org_name = input_dialog(
-                    title="Add Organization",
-                    text="Enter organization name:",
-                    style=STYLE
-                ).run()
-                
-                if org_name:
-                    source = radiolist_dialog(
-                        title="Repository Source",
-                        text="Select source:",
-                        values=[
-                            ("github", "GitHub"),
-                            ("huggingface", "Hugging Face Hub")
-                        ],
-                        style=STYLE
-                    ).run()
-                    
-                    if source:
-                        new_repo = {
-                            "type": "organization",
-                            "name": org_name,
-                            "source": source
-                        }
-                        
-                        # Check if already exists
-                        if new_repo not in config['repositories']:
-                            config['repositories'].append(new_repo)
-                            save_config(config)
-                            tqdm.write(f"Added organization: {org_name} ({source})")
-                        else:
-                            tqdm.write(f"Organization {org_name} ({source}) already exists.")
-            
-            elif repo_type == "repo":
-                repo_url = input_dialog(
-                    title="Add Repository",
-                    text="Enter repository URL:",
-                    style=STYLE
-                ).run()
-                
-                if repo_url:
-                    # Validate URL format
-                    if "github.com" in repo_url:
-                        source = "github"
-                    elif "huggingface.co" in repo_url:
-                        source = "huggingface"
-                    else:
-                        source = radiolist_dialog(
-                            title="Repository Source",
-                            text="Cannot determine source from URL. Select source:",
-                            values=[
-                                ("github", "GitHub"),
-                                ("huggingface", "Hugging Face Hub")
-                            ],
-                            style=STYLE
-                        ).run()
-                    
-                    if source:
-                        # Extract repo name from URL
-                        if repo_url.endswith("/"):
-                            repo_url = repo_url[:-1]
-                        
-                        repo_name = repo_url.split("/")[-1]
-                        org_name = repo_url.split("/")[-2]
-                        
-                        new_repo = {
-                            "type": "repository",
-                            "name": f"{org_name}/{repo_name}",
-                            "source": source,
-                            "url": repo_url
-                        }
-                        
-                        # Check if already exists
-                        if not any(r.get('url') == repo_url for r in config['repositories']):
-                            config['repositories'].append(new_repo)
-                            save_config(config)
-                            tqdm.write(f"Added repository: {repo_name}")
-                        else:
-                            tqdm.write(f"Repository {repo_name} already exists.")
-        
-        elif choice == "remove":
-            if not config['repositories']:
-                tqdm.write("No repositories to remove.")
-                continue
-                
-            # Create a list of repositories to choose from
-            repo_list = []
-            for i, repo in enumerate(config['repositories']):
-                if repo['type'] == 'organization':
-                    label = f"{repo['name']} (Organization, {repo['source']})"
-                else:
-                    label = f"{repo['name']} (Repository, {repo['source']})"
-                repo_list.append((i, label))
-            
-            # Let user select repositories to remove
-            selected = checkboxlist_dialog(
-                title="Remove Repositories",
-                text="Select repositories to remove:",
-                values=repo_list,
-                style=STYLE
-            ).run()
-            
-            if selected:
-                # Remove selected repositories (in reverse order to avoid index shifting)
-                for idx in sorted(selected, reverse=True):
-                    removed = config['repositories'].pop(idx)
-                    if removed['type'] == 'organization':
-                        tqdm.write(f"Removed organization: {removed['name']}")
-                    else:
-                        tqdm.write(f"Removed repository: {removed['name']}")
-                
-                save_config(config)
-        
-        elif choice == "list":
-            if not config['repositories']:
-                tqdm.write("No repositories configured.")
-            else:
-                tqdm.write("\nConfigured Repositories:")
-                for i, repo in enumerate(config['repositories'], 1):
-                    if repo['type'] == 'organization':
-                        tqdm.write(f"{i}. {repo['name']} (Organization, {repo['source']})")
-                    else:
-                        tqdm.write(f"{i}. {repo['name']} (Repository, {repo['source']})")
-                tqdm.write("")
-        
-        elif choice == "back" or choice is None:
-            break
-    
+    app = ManageRepositoriesApp(config)
+    app.run()
     return config
 
+class ConfigureSettingsApp(App):
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__()
+        self.config = config
+
+    async def on_mount(self) -> None:
+        self.body = ScrollView()
+        await self.view.dock(Header(), edge="top")
+        await self.view.dock(Footer(), edge="bottom")
+        await self.view.dock(self.body, edge="left")
+
+        self.output_directory_input = Input(value=self.config['output_directory'], placeholder="Output Directory")
+        self.test_ratio_input = Input(value=str(self.config['test_ratio']), placeholder="Test Split Ratio")
+        self.save_button = Button(label="Save", name="save")
+
+        await self.body.update(
+            GridView(
+                Label("Configure Settings"),
+                self.output_directory_input,
+                self.test_ratio_input,
+                self.save_button,
+                name="settings_grid"
+            )
+        )
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.name == "save":
+            self.config['output_directory'] = self.output_directory_input.value
+            self.config['test_ratio'] = float(self.test_ratio_input.value)
+            save_config(self.config)
+            await self.shutdown()
+
 def configure_settings(config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Configure general settings through TUI.
-    
-    Args:
-        config (Dict[str, Any]): Current configuration
-        
-    Returns:
-        Dict[str, Any]: Updated configuration
-    """
-    while True:
-        choice = radiolist_dialog(
-            title="Configure Settings",
-            text="Select a setting to configure:",
-            values=[
-                ("output", f"Output Directory ({config['output_directory']})"),
-                ("test_ratio", f"Test Split Ratio ({config['test_ratio']})"),
-                ("back", "Go Back")
-            ],
-            style=STYLE
-        ).run()
-        
-        if choice == "output":
-            output_dir = input_dialog(
-                title="Output Directory",
-                text="Enter the output directory path:",
-                default=config['output_directory'],
-                style=STYLE
-            ).run()
-            
-            if output_dir:
-                config['output_directory'] = output_dir
-                save_config(config)
-                tqdm.write(f"Output directory updated to: {output_dir}")
-        
-        elif choice == "test_ratio":
-            test_ratio_str = input_dialog(
-                title="Test Split Ratio",
-                text="Enter the test split ratio (between 0 and 1):",
-                default=str(config['test_ratio']),
-                style=STYLE
-            ).run()
-            
-            if test_ratio_str:
-                try:
-                    test_ratio = float(test_ratio_str)
-                    if 0 <= test_ratio <= 1:
-                        config['test_ratio'] = test_ratio
-                        save_config(config)
-                        tqdm.write(f"Test split ratio updated to: {test_ratio}")
-                    else:
-                        tqdm.write("Error: Test ratio must be between 0 and 1.")
-                except ValueError:
-                    tqdm.write("Error: Test ratio must be a number.")
-        
-        elif choice == "back" or choice is None:
-            break
-    
+    app = ConfigureSettingsApp(config)
+    app.run()
     return config
 
 # Module-level functions for multiprocessing
@@ -673,7 +530,7 @@ def extract_function_signature(py_path: str) -> List[Dict[str, Any]]:
                     elif char == ']':
                         bracket_depth -= 1
                     
-                    if char == ',' and bracket_depth == 0:
+                    if (char == ',' and bracket_depth == 0) or char == ')':
                         param_parts.append(current_part.strip())
                         current_part = ""
                     else:
@@ -2477,12 +2334,7 @@ def upload_to_huggingface(dataset: DatasetDict, config: Dict[str, Any], dataset_
             }.get(dataset_type, "documentation-dataset")
         
         # Ask for dataset name
-        dataset_name = input_dialog(
-            title="Upload to Hugging Face Hub",
-            text=f"Enter dataset name for {dataset_type.replace('_', ' ').title()} dataset:",
-            default=default_name,
-            style=STYLE
-        ).run()
+        dataset_name = await self.prompt(f"Enter dataset name for {dataset_type.replace('_', ' ').title()} dataset:", default=default_name)
         
         if not dataset_name:
             tqdm.write("Upload cancelled.")
@@ -2548,6 +2400,158 @@ def organize_content(organization: str, output_dir: str, use_github: bool = Fals
     # Process the repositories
     return process_all_repositories(config)
 
+class MainTUIApp(App):
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__()
+        self.config = config
+
+    async def on_mount(self) -> None:
+        self.body = ScrollView()
+        await self.view.dock(Header(), edge="top")
+        await self.view.dock(Footer(), edge="bottom")
+        await self.view.dock(self.body, edge="left")
+
+        self.menu_list = ListView(
+            ListItem(Label("Manage Credentials"), name="credentials"),
+            ListItem(Label(f"Manage Repositories ({len(self.config['repositories'])} configured)"), name="repositories"),
+            ListItem(Label("Configure Settings"), name="settings"),
+            ListItem(Label("Start Download and Processing"), name="start"),
+            ListItem(Label("Process Existing Downloaded Data"), name="process_existing"),
+            ListItem(Label("Upload Existing Dataset to Hugging Face Hub"), name="upload"),
+            ListItem(Label("Exit"), name="exit")
+        )
+
+        await self.body.update(self.menu_list)
+
+    async def on_list_view_selected(self, event: ListView.Selected) -> None:
+        choice = event.item.name
+
+        if choice == "credentials":
+            self.config = manage_credentials(self.config)
+        elif choice == "repositories":
+            self.config = manage_repositories(self.config)
+        elif choice == "settings":
+            self.config = configure_settings(self.config)
+        elif choice == "start":
+            if not self.config['repositories']:
+                await self.message("Error", "No repositories configured. Please add repositories first.")
+                return
+
+            # Start processing
+            tqdm.write("\nStarting download and processing of repository documentation...")
+            result = process_all_repositories(self.config)
+
+            if result:
+                dataset, sft_dataset, code_gen_dataset = result
+                tqdm.write("\nProcessing completed successfully.")
+
+                # Ask if user wants to upload to Hugging Face Hub
+                upload_choice = await self.prompt("Upload Dataset", "Do you want to upload this dataset to Hugging Face Hub?", options=[
+                    ("standard", "Yes, upload standard dataset"),
+                    ("sft", "Yes, upload SFT-ready dataset"),
+                    ("code_gen", "Yes, upload code generation dataset"),
+                    ("all", "Yes, upload all datasets"),
+                    ("no", "No, skip upload")
+                ])
+
+                if upload_choice == "standard":
+                    upload_to_huggingface(dataset, self.config, "standard")
+                elif upload_choice == "sft":
+                    upload_to_huggingface(sft_dataset, self.config, "sft")
+                elif upload_choice == "code_gen":
+                    upload_to_huggingface(code_gen_dataset, self.config, "code_gen")
+                elif upload_choice == "all":
+                    upload_to_huggingface(dataset, self.config, "standard")
+                    upload_to_huggingface(sft_dataset, self.config, "sft")
+                    upload_to_huggingface(code_gen_dataset, self.config, "code_gen")
+            else:
+                await self.message("Error", "Failed to create dataset. Check logs for details.")
+        elif choice == "process_existing":
+            # Ask for the directory with existing data
+            dir_path = await self.prompt("Process Existing Data", "Enter the directory path containing the downloaded data:", default=self.config['output_directory'])
+
+            if dir_path:
+                # Ask for test ratio
+                test_ratio_str = await self.prompt("Test Split Ratio", "Enter the test split ratio (between 0 and 1):", default=str(self.config['test_ratio']))
+
+                test_ratio = self.config['test_ratio']
+                if test_ratio_str:
+                    try:
+                        test_ratio = float(test_ratio_str)
+                        if not 0 <= test_ratio <= 1:
+                            test_ratio = self.config['test_ratio']
+                            tqdm.write(f"Invalid test ratio. Using default: {test_ratio}")
+                    except ValueError:
+                        tqdm.write(f"Invalid test ratio. Using default: {test_ratio}")
+
+                # Process the existing data
+                tqdm.write(f"\nProcessing existing data in {dir_path} with test ratio {test_ratio}...")
+                result = process_existing_data(dir_path, test_ratio)
+
+                if result:
+                    dataset, sft_dataset, code_gen_dataset = result
+                    tqdm.write("\nProcessing of existing data completed successfully.")
+
+                    # Ask if user wants to upload to Hugging Face Hub
+                    upload_choice = await self.prompt("Upload Dataset", "Do you want to upload this dataset to Hugging Face Hub?", options=[
+                        ("standard", "Yes, upload standard dataset"),
+                        ("sft", "Yes, upload SFT-ready dataset"),
+                        ("code_gen", "Yes, upload code generation dataset"),
+                        ("all", "Yes, upload all datasets"),
+                        ("no", "No, skip upload")
+                    ])
+
+                    if upload_choice == "standard":
+                        upload_to_huggingface(dataset, self.config, "standard")
+                    elif upload_choice == "sft":
+                        upload_to_huggingface(sft_dataset, self.config, "sft")
+                    elif upload_choice == "code_gen":
+                        upload_to_huggingface(code_gen_dataset, self.config, "code_gen")
+                    elif upload_choice == "all":
+                        upload_to_huggingface(dataset, self.config, "standard")
+                        upload_to_huggingface(sft_dataset, self.config, "sft")
+                        upload_to_huggingface(code_gen_dataset, self.config, "code_gen")
+                else:
+                    await self.message("Error", "Failed to process existing data. Check logs for details.")
+        elif choice == "upload":
+            # Ask which type of dataset to upload
+            dataset_type = await self.prompt("Upload Dataset Type", "Which type of dataset do you want to upload?", options=[
+                ("standard", "Standard Dataset"),
+                ("sft", "SFT-Ready Dataset"),
+                ("code_gen", "Code Generation Dataset")
+            ])
+
+            if dataset_type:
+                # Determine path based on dataset type
+                path_suffix = {
+                    "standard": "dataset",
+                    "sft": "sft_dataset",
+                    "code_gen": "code_generation_dataset"
+                }.get(dataset_type, "dataset")
+
+                default_path = os.path.join(self.config['output_directory'], path_suffix)
+
+                dataset_path = await self.prompt("Upload Existing Dataset", f"Enter path to the {dataset_type.replace('_', ' ').title()} dataset:", default=default_path)
+
+                if dataset_path:
+                    try:
+                        # Load the dataset
+                        tqdm.write(f"Loading dataset from {dataset_path}...")
+                        with tqdm(desc="Loading dataset", total=1) as pbar:
+                            dataset = DatasetDict.load_from_disk(dataset_path)
+                            pbar.update(1)
+
+                        tqdm.write(f"Dataset loaded with {len(dataset['train'])} training samples")
+                        if 'test' in dataset:
+                            tqdm.write(f"and {len(dataset['test'])} testing samples")
+
+                        # Upload the dataset
+                        upload_to_huggingface(dataset, self.config, dataset_type)
+                    except Exception as e:
+                        await self.message("Error", f"Error loading dataset: {str(e)}")
+        elif choice == "exit":
+            await self.shutdown()
+
 def main_tui():
     """Main function with TUI interface."""
     # Load or create configuration
@@ -2559,205 +2563,8 @@ def main_tui():
         pass
     
     # Main program loop
-    while True:
-        # Count repositories by type
-        github_repos = sum(1 for r in config['repositories'] if r.get('source') == 'github')
-        hf_repos = sum(1 for r in config['repositories'] if r.get('source') == 'huggingface')
-        
-        # Main menu
-        choice = radiolist_dialog(
-            title="SDK Documentation Downloader",
-            text="Select an action:",
-            values=[
-                ("credentials", "Manage Credentials"),
-                ("repositories", f"Manage Repositories ({len(config['repositories'])} configured)"),
-                ("settings", "Configure Settings"),
-                ("start", "Start Download and Processing"),
-                ("process_existing", "Process Existing Downloaded Data"),
-                ("upload", "Upload Existing Dataset to Hugging Face Hub"),
-                ("exit", "Exit")
-            ],
-            style=STYLE
-        ).run()
-        
-        if choice == "credentials":
-            config = manage_credentials(config)
-        
-        elif choice == "repositories":
-            config = manage_repositories(config)
-        
-        elif choice == "settings":
-            config = configure_settings(config)
-        
-        elif choice == "start":
-            if not config['repositories']:
-                message_dialog(
-                    title="Error",
-                    text="No repositories configured. Please add repositories first.",
-                    style=STYLE
-                ).run()
-                continue
-            
-            # Start processing
-            tqdm.write("\nStarting download and processing of repository documentation...")
-            result = process_all_repositories(config)
-            
-            if result:
-                dataset, sft_dataset, code_gen_dataset = result
-                tqdm.write("\nProcessing completed successfully.")
-                
-                # Ask if user wants to upload to Hugging Face Hub
-                upload_choice = radiolist_dialog(
-                    title="Upload Dataset",
-                    text="Do you want to upload this dataset to Hugging Face Hub?",
-                    values=[
-                        ("standard", "Yes, upload standard dataset"),
-                        ("sft", "Yes, upload SFT-ready dataset"),
-                        ("code_gen", "Yes, upload code generation dataset"),
-                        ("all", "Yes, upload all datasets"),
-                        ("no", "No, skip upload")
-                    ],
-                    style=STYLE
-                ).run()
-                
-                if upload_choice == "standard":
-                    upload_to_huggingface(dataset, config, "standard")
-                elif upload_choice == "sft":
-                    upload_to_huggingface(sft_dataset, config, "sft")
-                elif upload_choice == "code_gen":
-                    upload_to_huggingface(code_gen_dataset, config, "code_gen")
-                elif upload_choice == "all":
-                    upload_to_huggingface(dataset, config, "standard")
-                    upload_to_huggingface(sft_dataset, config, "sft")
-                    upload_to_huggingface(code_gen_dataset, config, "code_gen")
-            else:
-                message_dialog(
-                    title="Error",
-                    text="Failed to create dataset. Check logs for details.",
-                    style=STYLE
-                ).run()
-        
-        elif choice == "process_existing":
-            # Ask for the directory with existing data
-            dir_path = input_dialog(
-                title="Process Existing Data",
-                text="Enter the directory path containing the downloaded data:",
-                default=config['output_directory'],
-                style=STYLE
-            ).run()
-            
-            if dir_path:
-                # Ask for test ratio
-                test_ratio_str = input_dialog(
-                    title="Test Split Ratio",
-                    text="Enter the test split ratio (between 0 and 1):",
-                    default=str(config['test_ratio']),
-                    style=STYLE
-                ).run()
-                
-                test_ratio = config['test_ratio']
-                if test_ratio_str:
-                    try:
-                        test_ratio = float(test_ratio_str)
-                        if not 0 <= test_ratio <= 1:
-                            test_ratio = config['test_ratio']
-                            tqdm.write(f"Invalid test ratio. Using default: {test_ratio}")
-                    except ValueError:
-                        tqdm.write(f"Invalid test ratio. Using default: {test_ratio}")
-                
-                # Process the existing data
-                tqdm.write(f"\nProcessing existing data in {dir_path} with test ratio {test_ratio}...")
-                result = process_existing_data(dir_path, test_ratio)
-                
-                if result:
-                    dataset, sft_dataset, code_gen_dataset = result
-                    tqdm.write("\nProcessing of existing data completed successfully.")
-                    
-                    # Ask if user wants to upload to Hugging Face Hub
-                    upload_choice = radiolist_dialog(
-                        title="Upload Dataset",
-                        text="Do you want to upload this dataset to Hugging Face Hub?",
-                        values=[
-                            ("standard", "Yes, upload standard dataset"),
-                            ("sft", "Yes, upload SFT-ready dataset"),
-                            ("code_gen", "Yes, upload code generation dataset"),
-                            ("all", "Yes, upload all datasets"),
-                            ("no", "No, skip upload")
-                        ],
-                        style=STYLE
-                    ).run()
-                    
-                    if upload_choice == "standard":
-                        upload_to_huggingface(dataset, config, "standard")
-                    elif upload_choice == "sft":
-                        upload_to_huggingface(sft_dataset, config, "sft")
-                    elif upload_choice == "code_gen":
-                        upload_to_huggingface(code_gen_dataset, config, "code_gen")
-                    elif upload_choice == "all":
-                        upload_to_huggingface(dataset, config, "standard")
-                        upload_to_huggingface(sft_dataset, config, "sft")
-                        upload_to_huggingface(code_gen_dataset, config, "code_gen")
-                else:
-                    message_dialog(
-                        title="Error",
-                        text="Failed to process existing data. Check logs for details.",
-                        style=STYLE
-                    ).run()
-        
-        elif choice == "upload":
-            # Ask which type of dataset to upload
-            dataset_type = radiolist_dialog(
-                title="Upload Dataset Type",
-                text="Which type of dataset do you want to upload?",
-                values=[
-                    ("standard", "Standard Dataset"),
-                    ("sft", "SFT-Ready Dataset"),
-                    ("code_gen", "Code Generation Dataset")
-                ],
-                style=STYLE
-            ).run()
-            
-            if dataset_type:
-                # Determine path based on dataset type
-                path_suffix = {
-                    "standard": "dataset",
-                    "sft": "sft_dataset",
-                    "code_gen": "code_generation_dataset"
-                }.get(dataset_type, "dataset")
-                
-                default_path = os.path.join(config['output_directory'], path_suffix)
-                
-                dataset_path = input_dialog(
-                    title="Upload Existing Dataset",
-                    text=f"Enter path to the {dataset_type.replace('_', ' ').title()} dataset:",
-                    default=default_path,
-                    style=STYLE
-                ).run()
-                
-                if dataset_path:
-                    try:
-                        # Load the dataset
-                        tqdm.write(f"Loading dataset from {dataset_path}...")
-                        with tqdm(desc="Loading dataset", total=1) as pbar:
-                            dataset = DatasetDict.load_from_disk(dataset_path)
-                            pbar.update(1)
-                        
-                        tqdm.write(f"Dataset loaded with {len(dataset['train'])} training samples")
-                        if 'test' in dataset:
-                            tqdm.write(f"and {len(dataset['test'])} testing samples")
-                        
-                        # Upload the dataset
-                        upload_to_huggingface(dataset, config, dataset_type)
-                    except Exception as e:
-                        message_dialog(
-                            title="Error",
-                            text=f"Error loading dataset: {str(e)}",
-                            style=STYLE
-                        ).run()
-        
-        elif choice == "exit" or choice is None:
-            tqdm.write("Exiting...")
-            break
+    app = MainTUIApp(config)
+    app.run()
 
 def main():
     """Legacy main function (kept for backward compatibility)."""
