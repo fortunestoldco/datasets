@@ -15,6 +15,11 @@ from github import Github, GithubException
 from bs4 import BeautifulSoup
 from markdown import markdown
 from io import StringIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class GithubOrgDatasetGenerator:
     def __init__(self):
@@ -72,6 +77,7 @@ class GithubOrgDatasetGenerator:
             
             return "\n\n".join(text_content)
         except Exception as e:
+            logging.error(f"Error parsing notebook: {str(e)}")
             return f"Error parsing notebook: {str(e)}"
     
     def process_file(self, repo, file_path, target_dir, module_name, category):
@@ -133,7 +139,7 @@ class GithubOrgDatasetGenerator:
             
             return True
         except Exception as e:
-            print(f"Error processing file {file_path}: {str(e)}")
+            logging.error(f"Error processing file {file_path}: {str(e)}")
             return False
     
     def process_directory(self, repo, dir_path, target_dir, module_name, category):
@@ -157,7 +163,7 @@ class GithubOrgDatasetGenerator:
             
             return True
         except Exception as e:
-            print(f"Error processing directory {dir_path}: {str(e)}")
+            logging.error(f"Error processing directory {dir_path}: {str(e)}")
             return False
     
     def create_csv_files(self):
@@ -286,86 +292,20 @@ dataset = load_dataset("path/to/dataset")
                 total_repos = len(repos)
                 
                 # Process each repository
-                for i, repo in enumerate(repos):
-                    if progress:
-                        try:
-                            progress(i/total_repos, f"Processing repository {i+1}/{total_repos}: {repo.name}")
-                        except Exception as e:
-                            print(f"Warning: Error updating progress: {str(e)}")
+                with ThreadPoolExecutor() as executor:
+                    futures = []
+                    for i, repo in enumerate(repos):
+                        futures.append(executor.submit(self.process_repository, repo, i, total_repos, progress))
                     
-                    module_name = repo.name
-                    self.metadata["modules"].add(module_name)
-                    
-                    # Look for documentation directories
-                    try:
-                        # Check for docs directory
-                        try:
-                            docs_contents = repo.get_contents("docs")
-                            if docs_contents:
-                                self.process_directory(repo, "docs", self.train_dir, module_name, "docs")
-                        except Exception:
-                            pass
-                        
-                        # Check for doc directory
-                        try:
-                            doc_contents = repo.get_contents("doc")
-                            if doc_contents:
-                                self.process_directory(repo, "doc", self.train_dir, module_name, "docs")
-                        except Exception:
-                            pass
-                        
-                        # Check for examples directory
-                        try:
-                            examples_contents = repo.get_contents("examples")
-                            if examples_contents:
-                                self.process_directory(repo, "examples", self.train_dir, module_name, "examples")
-                        except Exception:
-                            pass
-                            
-                        # Check for example directory
-                        try:
-                            example_contents = repo.get_contents("example")
-                            if example_contents:
-                                self.process_directory(repo, "example", self.train_dir, module_name, "examples")
-                        except Exception:
-                            pass
-                        
-                        # Check for cookbooks directory
-                        try:
-                            cookbooks_contents = repo.get_contents("cookbooks")
-                            if cookbooks_contents:
-                                self.process_directory(repo, "cookbooks", self.train_dir, module_name, "cookbooks")
-                        except Exception:
-                            pass
-                            
-                        # Check for cookbook directory
-                        try:
-                            cookbook_contents = repo.get_contents("cookbook")
-                            if cookbook_contents:
-                                self.process_directory(repo, "cookbook", self.train_dir, module_name, "cookbooks")
-                        except Exception:
-                            pass
-                            
-                        # Check for tutorials directory
-                        try:
-                            tutorials_contents = repo.get_contents("tutorials")
-                            if tutorials_contents:
-                                self.process_directory(repo, "tutorials", self.train_dir, module_name, "examples")
-                        except Exception:
-                            pass
-                    
-                    except Exception as e:
-                        if "list index out of range" in str(e):
-                            print(f"List index out of range error in repository {repo.name}: {str(e)}")
-                        else:
-                            print(f"Error processing repository {repo.name}: {str(e)}")
+                    for future in as_completed(futures):
+                        future.result()
                 
                 # Create CSV files and other metadata
                 if progress:
                     try:
                         progress(0.9, "Creating dataset files...")
                     except Exception as e:
-                        print(f"Warning: Error updating progress: {str(e)}")
+                        logging.warning(f"Error updating progress: {str(e)}")
                 
                 self.create_csv_files()
                 
@@ -374,7 +314,7 @@ dataset = load_dataset("path/to/dataset")
                     try:
                         progress(0.95, "Creating zip archive...")
                     except Exception as e:
-                        print(f"Warning: Error updating progress: {str(e)}")
+                        logging.warning(f"Error updating progress: {str(e)}")
                 
                 zip_path = os.path.join(self.temp_dir, "dataset.zip")
                 with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -388,7 +328,7 @@ dataset = load_dataset("path/to/dataset")
                     try:
                         progress(1.0, "Dataset generation complete!")
                     except Exception as e:
-                        print(f"Warning: Error updating progress: {str(e)}")
+                        logging.warning(f"Error updating progress: {str(e)}")
                 
                 return True, zip_path
                 
@@ -402,6 +342,81 @@ dataset = load_dataset("path/to/dataset")
         finally:
             # Clean up temporary files, but keep the zip
             pass
+
+    def process_repository(self, repo, index, total_repos, progress):
+        """Process a single repository"""
+        if progress:
+            try:
+                progress(index/total_repos, f"Processing repository {index+1}/{total_repos}: {repo.name}")
+            except Exception as e:
+                logging.warning(f"Error updating progress: {str(e)}")
+        
+        module_name = repo.name
+        self.metadata["modules"].add(module_name)
+        
+        # Look for documentation directories
+        try:
+            # Check for docs directory
+            try:
+                docs_contents = repo.get_contents("docs")
+                if docs_contents:
+                    self.process_directory(repo, "docs", self.train_dir, module_name, "docs")
+            except Exception:
+                pass
+            
+            # Check for doc directory
+            try:
+                doc_contents = repo.get_contents("doc")
+                if doc_contents:
+                    self.process_directory(repo, "doc", self.train_dir, module_name, "docs")
+            except Exception:
+                pass
+            
+            # Check for examples directory
+            try:
+                examples_contents = repo.get_contents("examples")
+                if examples_contents:
+                    self.process_directory(repo, "examples", self.train_dir, module_name, "examples")
+            except Exception:
+                pass
+                
+            # Check for example directory
+            try:
+                example_contents = repo.get_contents("example")
+                if example_contents:
+                    self.process_directory(repo, "example", self.train_dir, module_name, "examples")
+            except Exception:
+                pass
+            
+            # Check for cookbooks directory
+            try:
+                cookbooks_contents = repo.get_contents("cookbooks")
+                if cookbooks_contents:
+                    self.process_directory(repo, "cookbooks", self.train_dir, module_name, "cookbooks")
+            except Exception:
+                pass
+                
+            # Check for cookbook directory
+            try:
+                cookbook_contents = repo.get_contents("cookbook")
+                if cookbook_contents:
+                    self.process_directory(repo, "cookbook", self.train_dir, module_name, "cookbooks")
+            except Exception:
+                pass
+                
+            # Check for tutorials directory
+            try:
+                tutorials_contents = repo.get_contents("tutorials")
+                if tutorials_contents:
+                    self.process_directory(repo, "tutorials", self.train_dir, module_name, "examples")
+            except Exception:
+                pass
+        
+        except Exception as e:
+            if "list index out of range" in str(e):
+                logging.error(f"List index out of range error in repository {repo.name}: {str(e)}")
+            else:
+                logging.error(f"Error processing repository {repo.name}: {str(e)}")
 
 def generate_dataset(org_url, github_token, max_repos, progress=gr.Progress()):
     """Generate dataset from GitHub organization"""
