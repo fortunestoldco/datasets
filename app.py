@@ -355,7 +355,10 @@ dataset = load_dataset("path/to/dataset")
                             pass
                     
                     except Exception as e:
-                        print(f"Error processing repository {repo.name}: {str(e)}")
+                        if "list index out of range" in str(e):
+                            print(f"List index out of range error in repository {repo.name}: {str(e)}")
+                        else:
+                            print(f"Error processing repository {repo.name}: {str(e)}")
                 
                 # Create CSV files and other metadata
                 if progress:
@@ -393,6 +396,8 @@ dataset = load_dataset("path/to/dataset")
                 return False, f"GitHub API error: {str(e)}"
             
         except Exception as e:
+            if "list index out of range" in str(e):
+                return False, "Error: list index out of range"
             return False, f"Error: {str(e)}"
         finally:
             # Clean up temporary files, but keep the zip
@@ -407,6 +412,8 @@ def generate_dataset(org_url, github_token, max_repos, progress=gr.Progress()):
         # Return the path to the zip file
         return result
     else:
+        if "list index out of range" in result:
+            return "Error: list index out of range"
         # Return the error message
         raise gr.Error(result)
 
