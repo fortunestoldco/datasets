@@ -1,0 +1,3 @@
+2025-03-25 14:29:39,442 - INFO - Installing missing libraries: gitpython, python-dotenv
+2025-03-25 14:29:42,039 - INFO - All required libraries installed successfully.
+2025-03-25 14:29:48,865 - ERROR - Unexpected error: No module named 'ui.dialogs'
