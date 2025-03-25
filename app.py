@@ -30,7 +30,7 @@ class GithubOrgDatasetGenerator:
         self.metadata = {
             "files": [],
             "modules": set(),
-            "file_counts": {"py": 0, "ipynb": 0, "md": 0, "other": 0}
+            "file_counts": {"py": 0, "ipynb": 0, "md": 0, "rst": 0, "txt": 0, "html": 0, "other": 0}
         }
         
     def setup_directories(self):
@@ -96,7 +96,7 @@ class GithubOrgDatasetGenerator:
             ext = ext.lower().lstrip('.')
             
             # Update file count
-            if ext in ['py', 'ipynb', 'md']:
+            if ext in ['py', 'ipynb', 'md', 'rst', 'txt', 'html']:
                 self.metadata["file_counts"][ext] += 1
             else:
                 self.metadata["file_counts"]["other"] += 1
@@ -166,7 +166,7 @@ class GithubOrgDatasetGenerator:
                     # Only process files with specific extensions
                     _, ext = os.path.splitext(content.name)
                     ext = ext.lower().lstrip('.')
-                    if ext in ['py', 'ipynb', 'md']:
+                    if ext in ['py', 'ipynb', 'md', 'rst', 'txt', 'html']:
                         self.process_file(repo, content.path, target_dir, module_name, category)
             
             return True
@@ -247,6 +247,9 @@ This dataset contains documentation, examples, and cookbooks from GitHub reposit
   - Python files (.py): {self.metadata["file_counts"]["py"]}
   - Jupyter notebooks (.ipynb): {self.metadata["file_counts"]["ipynb"]}
   - Markdown files (.md): {self.metadata["file_counts"]["md"]}
+  - reStructuredText files (.rst): {self.metadata["file_counts"]["rst"]}
+  - Text files (.txt): {self.metadata["file_counts"]["txt"]}
+  - HTML files (.html): {self.metadata["file_counts"]["html"]}
   - Other files: {self.metadata["file_counts"]["other"]}
 
 ## Modules
@@ -265,7 +268,7 @@ dataset = load_dataset("path/to/dataset")
         with open(os.path.join(self.dataset_dir, "README.md"), 'w', encoding='utf-8') as f:
             f.write(readme_content)
         
-    def process_organization(self, org_url, github_token=None, max_repos=None, progress=None):
+    def process_organization(self, org_url, github_token=None, max_repos=None, progress=None, include_private=False):
         """Process all repositories in a GitHub organization"""
         try:
             # Extract organization name
@@ -287,7 +290,7 @@ dataset = load_dataset("path/to/dataset")
                 try:
                     # Use pagination to avoid memory issues and potential list index errors
                     repos = []
-                    for repo in org.get_repos():
+                    for repo in org.get_repos(type='all' if include_private else 'public'):
                         repos.append(repo)
                         
                     # Check if there are any repositories
@@ -436,10 +439,10 @@ dataset = load_dataset("path/to/dataset")
             else:
                 logging.error(f"Error processing repository {repo.name}: {str(e)}")
 
-def generate_dataset(org_url, github_token, max_repos, progress=gr.Progress()):
+def generate_dataset(org_url, github_token, max_repos, progress=gr.Progress(), include_private=False):
     """Generate dataset from GitHub organization"""
     generator = GithubOrgDatasetGenerator()
-    success, result = generator.process_organization(org_url, github_token, max_repos, progress)
+    success, result = generator.process_organization(org_url, github_token, max_repos, progress, include_private)
     
     if success:
         # Return the path to the zip file
@@ -542,6 +545,11 @@ with gr.Blocks(title="GitHub Organization Dataset Generator") as app:
                 step=1
             )
             
+            include_private = gr.Checkbox(
+                label="Include Private Repositories",
+                info="Check this box to include private repositories (requires appropriate GitHub token permissions)"
+            )
+            
             with gr.Row():
                 sample_button = gr.Button("Use Sample Org (HuggingFace)")
                 generate_button = gr.Button("Generate Dataset", variant="primary")
@@ -557,7 +565,7 @@ with gr.Blocks(title="GitHub Organization Dataset Generator") as app:
     
     generate_button.click(
         fn=generate_dataset,
-        inputs=[org_url, github_token, max_repos],
+        inputs=[org_url, github_token, max_repos, include_private],
         outputs=output
     )
     
