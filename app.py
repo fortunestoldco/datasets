@@ -1242,6 +1242,38 @@ def get_organization_repos_github(organization: str, token: Optional[str] = None
         logger.error(traceback.format_exc())
         return []
 
+def check_repo_for_folders(repo_url: str, token: Optional[str] = None) -> bool:
+    """
+    Check if the repository contains documentation, examples, or cookbooks folders.
+
+    Args:
+        repo_url (str): The URL of the repository.
+        token (Optional[str]): API token for authentication.
+
+    Returns:
+        bool: True if any of the folders are found, False otherwise.
+    """
+    try:
+        headers = {"Authorization": f"token {token}"} if token else {}
+        response = requests.get(repo_url, headers=headers)
+
+        if response.status_code != 200:
+            tqdm.write(f"Failed to access repository {repo_url}. Status code: {response.status_code}")
+            return False
+
+        repo_content = response.json()
+        folder_names = [item['name'].lower() for item in repo_content if item['type'] == 'dir']
+
+        target_folders = ['docs', 'examples', 'cookbook', 'cookbooks', 'documentation', 'tutorials']
+        for folder in target_folders:
+            if folder in folder_names:
+                return True
+
+        return False
+    except Exception as e:
+        tqdm.write(f"Error checking repository {repo_url} for folders: {str(e)}")
+        return False
+
 def download_repo_content_hf(repo_id: str, output_dir: str, token: Optional[str] = None) -> Optional[str]:
     """
     Download the repository content from Hugging Face to a temporary directory.
@@ -1255,6 +1287,11 @@ def download_repo_content_hf(repo_id: str, output_dir: str, token: Optional[str]
         Optional[str]: Path to the downloaded repository or None if download failed.
     """
     try:
+        repo_url = f"https://huggingface.co/api/models/{repo_id}/tree/main"
+        if not check_repo_for_folders(repo_url, token):
+            tqdm.write(f"Skipping download of {repo_id} as it does not contain documentation, examples, or cookbooks.")
+            return None
+
         tqdm.write(f"Downloading Hugging Face repository: {repo_id}")
         repo_path = os.path.join(output_dir, repo_id.split('/')[-1])
         os.makedirs(repo_path, exist_ok=True)
@@ -1289,6 +1326,10 @@ def download_repo_content_github(repo_url: str, output_dir: str, token: Optional
         Optional[str]: Path to the downloaded repository or None if download failed.
     """
     try:
+        if not check_repo_for_folders(repo_url, token):
+            tqdm.write(f"Skipping download of {repo_url} as it does not contain documentation, examples, or cookbooks.")
+            return None
+
         repo_name = repo_url.split('/')[-1]
         tqdm.write(f"Cloning GitHub repository: {repo_url}")
         repo_path = os.path.join(output_dir, repo_name)
@@ -1983,9 +2024,9 @@ def process_repository(repo_info: Dict[str, Any], output_dir: str, temp_dir: str
         repo_info (Dict[str, Any]): Repository information
         output_dir (str): Output directory
         temp_dir (str): Temporary directory for downloads
-        github_token (Optional[str]): GitHub API token
-        huggingface_token (Optional[str]): Hugging Face token
-        test_ratio (float): Test split ratio
+        github_token: Optional[str]: GitHub API token
+        huggingface_token: Optional[str]: Hugging Face token
+        test_ratio: float: Test split ratio
         
     Returns:
         Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]: Training and testing data
