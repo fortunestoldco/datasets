@@ -50,6 +50,12 @@ To run the application, use the following command:
 python app.py
 ```
 
+To create a public link, use the following command:
+
+```bash
+python app.py --share=True
+```
+
 ### Testing
 
 To run the unit tests and integration tests, use the following command:
