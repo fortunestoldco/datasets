@@ -52,4 +52,3 @@ def save_config(config: dict) -> None:
         os.chmod(CONFIG_FILE, 0o600)
     except Exception as e:
         logger.error(f"Error saving configuration file: {str(e)}")
-

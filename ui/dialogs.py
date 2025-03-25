@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from typing import List, Tuple
-from textual import on
 from textual.app import ComposeResult
 from textual.widgets import Button, Input, Label, ListView, ListItem
 from textual.containers import Container, Horizontal

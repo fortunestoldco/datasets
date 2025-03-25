@@ -4,7 +4,7 @@ import os
 import sys
 import subprocess
 from typing import Dict, Any, Optional, Tuple
-from textual import on, work
+from textual import work
 from textual.app import App, ComposeResult
 from textual.widgets import Button, Label, ListView, ListItem, Header, Footer
 from textual.containers import Container
@@ -43,9 +43,9 @@ class MainTUIApp(App[None]):
         with Container(id="main-container"):
             yield ListView(
                 ListItem(Label("Manage Credentials"), id="credentials"),
-                ListItem(Label(f"Manage Repositories ({len(self.config['repositories'])} configured)"), id="repositories"),
+                ListItem(Label("Manage Repositories"), id="repositories"),
                 ListItem(Label("Configure Settings"), id="settings"),
-                ListItem(Label("Start Download and Processing"), id="start"),
+                ListItem(Label("Generate new Dataset"), id="start"),
                 ListItem(Label("Process Existing Downloaded Data"), id="process_existing"),
                 ListItem(Label("Train with AutoTrain"), id="autotrain"),
                 ListItem(Label("Upload Existing Dataset to Hugging Face Hub"), id="upload"),
@@ -95,59 +95,92 @@ class MainTUIApp(App[None]):
                 self.config = updated_config
 
         elif choice == "start":
-            if not self.config['repositories']:
-                await self.push_screen(MessageDialog("Error", "No repositories configured. Please add repositories first."))
-                return
+            # Show input dialog for repository URL
+            from ui.dialogs import InputDialog
+            url_dialog = InputDialog("Enter repository URL or organization/name:", "")
+            repo_url = await self.push_screen(url_dialog)
+            
+            if repo_url:
+                # Clean up the URL
+                repo_url = repo_url.strip()
+                if not repo_url:
+                    await self.push_screen(MessageDialog("Error", "Please enter a valid repository URL or name."))
+                    return
 
-            # Start processing
-            self.notify("Starting download and processing...", severity="information")
+                # Format repo name if it's a shorthand (e.g. "org/repo")
+                if '/' in repo_url and not repo_url.startswith(('http://', 'https://')):
+                    if not repo_url.startswith('github.com/'):
+                        repo_url = f"https://github.com/{repo_url}"
+                    else:
+                        repo_url = f"https://{repo_url}"
 
-            # Run the processing in a worker to avoid freezing
-            result = await self.run_worker(
-                process_all_repositories,
-                self.config
-            )
+                # Show confirmation dialog
+                from ui.dialogs import ConfirmationScreen
+                confirm = await self.push_screen(ConfirmationScreen(f"Generate dataset from {repo_url}?"))
+                
+                if confirm:
+                    # Configure single repository
+                    self.config['repositories'] = [{
+                        "name": repo_url,
+                        "type": "repository",
+                        "source": "github",
+                        "url": repo_url,  # Add the URL explicitly
+                        "num_files": 0
+                    }]
 
-            if result:
-                dataset, sft_dataset, code_gen_dataset = result
-                self.notify("Processing completed successfully.", severity="success")
+                    # Save the config to ensure it persists
+                    from config import save_config
+                    save_config(self.config)
+                    
+                    # Start processing
+                    self.notify("Starting dataset generation...", severity="information")
 
-                # Ask if user wants to upload to Hugging Face Hub
-                upload_dialog = SelectDialog(
-                    "Upload Dataset?",
-                    "Do you want to upload this dataset to Hugging Face Hub?",
-                    [
-                        ("standard", "Yes, upload standard dataset"),
-                        ("sft", "Yes, upload SFT-ready dataset"),
-                        ("code_gen", "Yes, upload code generation dataset"),
-                        ("all", "Yes, upload all datasets"),
-                        ("no", "No, skip upload")
-                    ]
-                )
-                upload_choice = await self.push_screen(upload_dialog)
+                    # Run the processing in a worker
+                    result = await self.run_worker(
+                        process_all_repositories,
+                        self.config
+                    )
 
-                if upload_choice and upload_choice != "no":
-                    # Handle uploading based on choice
-                    if upload_choice == "standard" or upload_choice == "all":
-                        name_dialog = InputDialog("Enter dataset name for Standard dataset:")
-                        name = await self.push_screen(name_dialog)
-                        await self.run_worker(
-                            lambda: upload_to_huggingface(dataset, self.config, "standard", name)
+                    if result:
+                        dataset, sft_dataset, code_gen_dataset = result
+                        self.notify("Dataset generation completed successfully.", severity="success")
+
+                        # Ask if user wants to upload to Hugging Face Hub
+                        upload_dialog = SelectDialog(
+                            "Upload Dataset?",
+                            "Do you want to upload this dataset to Hugging Face Hub?",
+                            [
+                                ("standard", "Yes, upload standard dataset"),
+                                ("sft", "Yes, upload SFT-ready dataset"),
+                                ("code_gen", "Yes, upload code generation dataset"),
+                                ("all", "Yes, upload all datasets"),
+                                ("no", "No, skip upload")
+                            ]
                         )
-                    if upload_choice == "sft" or upload_choice == "all":
-                        name_dialog = InputDialog("Enter dataset name for SFT dataset:")
-                        name = await self.push_screen(name_dialog)
-                        await self.run_worker(
-                            lambda: upload_to_huggingface(sft_dataset, self.config, "sft", name)
-                        )
-                    if upload_choice == "code_gen" or upload_choice == "all":
-                        name_dialog = InputDialog("Enter dataset name for Code Generation dataset:")
-                        name = await self.push_screen(name_dialog)
-                        await self.run_worker(
-                            lambda: upload_to_huggingface(code_gen_dataset, self.config, "code_gen", name)
-                        )
-            else:
-                await self.push_screen(MessageDialog("Error", "Failed to create dataset. Check logs for details."))
+                        upload_choice = await self.push_screen(upload_dialog)
+
+                        if upload_choice and upload_choice != "no":
+                            # Handle uploading based on choice
+                            if upload_choice == "standard" or upload_choice == "all":
+                                name_dialog = InputDialog("Enter dataset name for Standard dataset:")
+                                name = await self.push_screen(name_dialog)
+                                await self.run_worker(
+                                    lambda: upload_to_huggingface(dataset, self.config, "standard", name)
+                                )
+                            if upload_choice == "sft" or upload_choice == "all":
+                                name_dialog = InputDialog("Enter dataset name for SFT dataset:")
+                                name = await self.push_screen(name_dialog)
+                                await self.run_worker(
+                                    lambda: upload_to_huggingface(sft_dataset, self.config, "sft", name)
+                                )
+                            if upload_choice == "code_gen" or upload_choice == "all":
+                                name_dialog = InputDialog("Enter dataset name for Code Generation dataset:")
+                                name = await self.push_screen(name_dialog)
+                                await self.run_worker(
+                                    lambda: upload_to_huggingface(code_gen_dataset, self.config, "code_gen", name)
+                                )
+                    else:
+                        await self.push_screen(MessageDialog("Error", "Failed to create dataset. Check logs for details."))
 
         elif choice == "process_existing":
             # Ask for the directory with existing data
@@ -323,9 +356,9 @@ class MainTUIApp(App[None]):
                 train_split=params["train_split"],
                 text_column=params["text_column"],
                 chat_template=params.get("chat_template"),
-                epochs=params["epochs"],
-                batch_size=params["batch_size"],
-                lr=params["lr"],
+                epochs=int(params["epochs"]),
+                batch_size=int(params["batch_size"]),
+                lr=float(params["lr"]),
                 peft=params.get("peft", True),
                 quantization=params.get("quantization", "int4"),
                 target_modules=params.get("target_modules", "all-linear"),

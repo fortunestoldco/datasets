@@ -81,16 +81,20 @@ def process_repository(repo_info: Dict[str, Any], output_dir: str, temp_dir: str
                 all_test_data.extend(test_data)
 
         else:  # Individual repository
-            # Extract repository information
-            if 'url' in repo_info:
-                repo_url = repo_info['url']
-                repo_name = repo_info['name']
-            else:
-                repo_name = repo_info['name']
-                org_name = repo_name.split('/')[0] if '/' in repo_name else ''
-                repo_short_name = repo_name.split('/')[-1]
-
-                repo_url = f"https://github.com/{org_name}/{repo_short_name}"
+            # Extract repository information - First check for explicit URL
+            repo_url = repo_info.get('url', '')  
+            if not repo_url:
+                # If no URL, try to construct from name
+                repo_name = repo_info.get('name', '')
+                if 'github.com' in repo_name:
+                    # Handle full github URLs
+                    repo_url = repo_name if repo_name.startswith('http') else f"https://{repo_name}"
+                else:
+                    # Handle shorthand notation (org/repo)
+                    repo_url = f"https://github.com/{repo_name}"
+            
+            repo_name = repo_url.rstrip('/').split('/')[-2] + '/' + repo_url.rstrip('/').split('/')[-1]
+            repo_short_name = repo_url.rstrip('/').split('/')[-1]
 
             # Download repository
             repo_path = download_repo_content_github(repo_url, temp_dir, github_token)
@@ -100,7 +104,6 @@ def process_repository(repo_info: Dict[str, Any], output_dir: str, temp_dir: str
                 return [], []
 
             # Extract and convert files
-            repo_short_name = repo_name.split('/')[-1] if '/' in repo_name else repo_name
             files_by_category = extract_and_convert_files(repo_path, output_dir, repo_short_name)
 
             # Split into train and test

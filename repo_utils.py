@@ -223,7 +223,14 @@ def download_repo_content_github(repo_url: str, output_dir: str, token: Optional
         Optional[str]: Path to the downloaded repository or None if download failed.
     """
     try:
-        if not check_repo_for_folders(repo_url, token):
+        # Extract API URL from repo URL
+        api_url = None
+        if repo_url.startswith("https://github.com/"):
+            owner_repo = repo_url[19:].strip('/')
+            api_url = f"https://api.github.com/repos/{owner_repo}/contents"
+        
+        # Check if the repository contains target folders
+        if api_url and not check_repo_for_folders(api_url, token):
             tqdm.write(f"Skipping download of {repo_url} as it does not contain documentation, examples, or cookbooks.")
             return None
 
