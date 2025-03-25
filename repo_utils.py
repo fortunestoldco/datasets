@@ -155,21 +155,28 @@ def check_repo_for_folders(repo_url: str, token: Optional[str] = None) -> bool:
         response = requests.get(repo_url, headers=headers)
 
         if response.status_code != 200:
-            tqdm.write(f"Failed to access repository {repo_url}. Status code: {response.status_code}")
+            logger.warning(f"Failed to access repository {repo_url}. Status code: {response.status_code}")
+            # Return True to continue with the clone anyway - we'll filter files later
+            return True
+
+        try:
+            repo_content = response.json()
+            folder_names = [item['name'].lower() for item in repo_content if item['type'] == 'dir']
+
+            target_folders = ['docs', 'examples', 'cookbook', 'cookbooks', 'documentation', 'tutorials']
+            for folder in target_folders:
+                if folder in folder_names:
+                    return True
+
             return False
-
-        repo_content = response.json()
-        folder_names = [item['name'].lower() for item in repo_content if item['type'] == 'dir']
-
-        target_folders = ['docs', 'examples', 'cookbook', 'cookbooks', 'documentation', 'tutorials']
-        for folder in target_folders:
-            if folder in folder_names:
-                return True
-
-        return False
+        except ValueError:
+            # If we can't parse JSON, assume it's not a valid API endpoint and skip the check
+            logger.warning(f"Could not parse response from {repo_url} as JSON")
+            return True
     except Exception as e:
-        tqdm.write(f"Error checking repository {repo_url} for folders: {str(e)}")
-        return False
+        logger.error(f"Error checking repository {repo_url} for folders: {str(e)}")
+        # In case of error, continue with the download
+        return True
 
 def download_repo_content_hf(repo_id: str, output_dir: str, token: Optional[str] = None) -> Optional[str]:
     """
@@ -226,13 +233,15 @@ def download_repo_content_github(repo_url: str, output_dir: str, token: Optional
         # Extract API URL from repo URL
         api_url = None
         if repo_url.startswith("https://github.com/"):
-            owner_repo = repo_url[19:].strip('/')
+            owner_repo = repo_url[19:].strip('/')  # Remove 'https://github.com/'
             api_url = f"https://api.github.com/repos/{owner_repo}/contents"
         
-        # Check if the repository contains target folders
-        if api_url and not check_repo_for_folders(api_url, token):
-            tqdm.write(f"Skipping download of {repo_url} as it does not contain documentation, examples, or cookbooks.")
-            return None
+        # Log for debugging
+        logger.info(f"Repository URL: {repo_url}")
+        logger.info(f"API URL: {api_url}")
+        
+        # Skip the content check - we'll process whatever files we find
+        # This ensures we don't block repositories that might have different structures
 
         repo_name = repo_url.split('/')[-1]
         tqdm.write(f"Cloning GitHub repository: {repo_url}")
@@ -266,6 +275,7 @@ def download_repo_content_github(repo_url: str, output_dir: str, token: Optional
         return repo_path
     except Exception as e:
         tqdm.write(f"Error cloning GitHub repository {repo_url}: {str(e)}")
+        logger.error(traceback.format_exc())
         return None
 
 def find_files_in_target_folders(repo_path: str, file_types: List[str], target_folders: List[str]) -> Dict[str, List[str]]:
@@ -301,30 +311,44 @@ def find_files_in_target_folders(repo_path: str, file_types: List[str], target_f
                 if dir_name.lower() in [f.lower() for f in target_folders]:
                     target_folder_paths.append((os.path.join(root, dir_name), dir_name))
 
-    tqdm.write(f"Found {len(target_folder_paths)} target directories to scan")
+    # If no target folders found, search all directories for relevant files
+    if not target_folder_paths:
+        tqdm.write(f"No standard documentation directories found. Scanning all directories for relevant files.")
+        # Scan all files in the repository
+        for root, _, files in os.walk(repo_path):
+            # Skip .git directory
+            if '.git' in root.split(os.path.sep):
+                continue
+                
+            for file in files:
+                if any(file.endswith(ext) for ext in file_types):
+                    file_path = os.path.join(root, file)
+                    result['other'].append(file_path)
+    else:
+        tqdm.write(f"Found {len(target_folder_paths)} target directories to scan")
 
-    # Now scan only within those target folders
-    all_files_count = 0
+        # Now scan only within those target folders
+        all_files_count = 0
 
-    with tqdm(total=len(target_folder_paths), desc="Scanning target folders", leave=False) as pbar:
-        for folder_path, original_folder_name in target_folder_paths:
-            pbar.set_description(f"Scanning {original_folder_name}")
+        with tqdm(total=len(target_folder_paths), desc="Scanning target folders", leave=False) as pbar:
+            for folder_path, original_folder_name in target_folder_paths:
+                pbar.set_description(f"Scanning {original_folder_name}")
 
-            # Find the matching target folder name (preserving case)
-            target_category = next((t for t in target_folders if t.lower() == original_folder_name.lower()), 'other')
+                # Find the matching target folder name (preserving case)
+                target_category = next((t for t in target_folders if t.lower() == original_folder_name.lower()), 'other')
 
-            # Find matching files in this folder and its subdirectories
-            for root, _, files in os.walk(folder_path):
-                for file in files:
-                    if any(file.endswith(ext) for ext in file_types):
-                        file_path = os.path.join(root, file)
-                        result[target_category].append(file_path)
-                        all_files_count += 1
+                # Find matching files in this folder and its subdirectories
+                for root, _, files in os.walk(folder_path):
+                    for file in files:
+                        if any(file.endswith(ext) for ext in file_types):
+                            file_path = os.path.join(root, file)
+                            result[target_category].append(file_path)
+                            all_files_count += 1
 
-            pbar.update(1)
+                pbar.update(1)
 
-    # Log the findings
-    tqdm.write(f"Found {all_files_count} matching files in target folders")
+        # Log the findings
+        tqdm.write(f"Found {all_files_count} matching files in target folders")
 
     # Log counts by category
     for category, files in result.items():

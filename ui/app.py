@@ -4,7 +4,7 @@ import os
 import sys
 import subprocess
 from typing import Dict, Any, Optional, Tuple
-from textual import work
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.widgets import Button, Label, ListView, ListItem, Header, Footer
 from textual.containers import Container
@@ -13,6 +13,7 @@ from ui.dialogs import MessageDialog, InputDialog, SelectDialog, ConfirmationScr
 from ui.screens import ManageCredentialsScreen, ManageRepositoriesScreen, ConfigureSettingsScreen, AutoTrainScreen
 from processors import process_all_repositories, process_existing_data
 from dataset_utils import upload_to_huggingface
+from config import save_config
 
 class MainTUIApp(App[None]):
     """Main TUI application."""
@@ -40,10 +41,11 @@ class MainTUIApp(App[None]):
 
 """
         yield Label(ascii_art, id="app-title")
+        repo_count = len(self.config.get('repositories', []))
         with Container(id="main-container"):
             yield ListView(
                 ListItem(Label("Manage Credentials"), id="credentials"),
-                ListItem(Label("Manage Repositories"), id="repositories"),
+                ListItem(Label(f"Manage Repositories ({repo_count} configured)"), id="repositories"),
                 ListItem(Label("Configure Settings"), id="settings"),
                 ListItem(Label("Generate new Dataset"), id="start"),
                 ListItem(Label("Process Existing Downloaded Data"), id="process_existing"),
@@ -53,6 +55,20 @@ class MainTUIApp(App[None]):
                 id="menu-list"
             )
         yield Footer()
+
+    def _update_main_menu(self):
+        """Helper method to update the main menu"""
+        repo_count = len(self.config['repositories'])
+        menu_list = self.query_one("#menu-list")
+        menu_list.clear()
+        menu_list.append(ListItem(Label("Manage Credentials"), id="credentials"))
+        menu_list.append(ListItem(Label(f"Manage Repositories ({repo_count} configured)"), id="repositories"))
+        menu_list.append(ListItem(Label("Configure Settings"), id="settings"))
+        menu_list.append(ListItem(Label("Generate new Dataset"), id="start"))
+        menu_list.append(ListItem(Label("Process Existing Downloaded Data"), id="process_existing"))
+        menu_list.append(ListItem(Label("Train with AutoTrain"), id="autotrain"))
+        menu_list.append(ListItem(Label("Upload Existing Dataset to Hugging Face Hub"), id="upload"))
+        menu_list.append(ListItem(Label("Exit"), id="exit"))
 
     def action_cycle_theme(self) -> None:
         """Cycle through available themes."""
@@ -70,33 +86,24 @@ class MainTUIApp(App[None]):
             updated_config = await self.push_screen(screen)
             if updated_config:
                 self.config = updated_config
+                self._update_main_menu()
 
         elif choice == "repositories":
             screen = ManageRepositoriesScreen(self.config)
             updated_config = await self.push_screen(screen)
             if updated_config:
                 self.config = updated_config
-                # Update the repositories count in the menu
-                repo_count = len(self.config['repositories'])
-                self.query_one("#menu-list").clear()
-                self.query_one("#menu-list").append(ListItem(Label("Manage Credentials"), id="credentials"))
-                self.query_one("#menu-list").append(ListItem(Label(f"Manage Repositories ({repo_count} configured)"), id="repositories"))
-                self.query_one("#menu-list").append(ListItem(Label("Configure Settings"), id="settings"))
-                self.query_one("#menu-list").append(ListItem(Label("Start Download and Processing"), id="start"))
-                self.query_one("#menu-list").append(ListItem(Label("Process Existing Downloaded Data"), id="process_existing"))
-                self.query_one("#menu-list").append(ListItem(Label("Train with AutoTrain"), id="autotrain"))
-                self.query_one("#menu-list").append(ListItem(Label("Upload Existing Dataset to Hugging Face Hub"), id="upload"))
-                self.query_one("#menu-list").append(ListItem(Label("Exit"), id="exit"))
+                self._update_main_menu()
 
         elif choice == "settings":
             screen = ConfigureSettingsScreen(self.config)
             updated_config = await self.push_screen(screen)
             if updated_config:
                 self.config = updated_config
+                self._update_main_menu()
 
         elif choice == "start":
             # Show input dialog for repository URL
-            from ui.dialogs import InputDialog
             url_dialog = InputDialog("Enter repository URL or organization/name:", "")
             repo_url = await self.push_screen(url_dialog)
             
@@ -115,8 +122,10 @@ class MainTUIApp(App[None]):
                         repo_url = f"https://{repo_url}"
 
                 # Show confirmation dialog
-                from ui.dialogs import ConfirmationScreen
-                confirm = await self.push_screen(ConfirmationScreen(f"Generate dataset from {repo_url}?"))
+                confirm = await self.push_screen(ConfirmationScreen(
+                    "Generate Dataset", 
+                    f"Generate dataset from {repo_url}?"
+                ))
                 
                 if confirm:
                     # Configure single repository
@@ -129,8 +138,8 @@ class MainTUIApp(App[None]):
                     }]
 
                     # Save the config to ensure it persists
-                    from config import save_config
                     save_config(self.config)
+                    self._update_main_menu()
                     
                     # Start processing
                     self.notify("Starting dataset generation...", severity="information")
@@ -327,7 +336,7 @@ class MainTUIApp(App[None]):
 
         elif choice == "exit":
             # Create a proper confirmation dialog
-            confirm_screen = ConfirmationScreen("Exit Application")
+            confirm_screen = ConfirmationScreen("Exit Application", "Are you sure you want to quit?")
             confirmed = await self.push_screen(confirm_screen)
             if confirmed:
                 await self.action_quit()
@@ -356,9 +365,9 @@ class MainTUIApp(App[None]):
                 train_split=params["train_split"],
                 text_column=params["text_column"],
                 chat_template=params.get("chat_template"),
-                epochs=int(params["epochs"]),
-                batch_size=int(params["batch_size"]),
-                lr=float(params["lr"]),
+                epochs=params["epochs"],
+                batch_size=params["batch_size"],
+                lr=params["lr"],
                 peft=params.get("peft", True),
                 quantization=params.get("quantization", "int4"),
                 target_modules=params.get("target_modules", "all-linear"),
@@ -377,6 +386,6 @@ class MainTUIApp(App[None]):
 
     def action_quit(self) -> None:
         self.push_screen(
-            ConfirmationScreen("Are you sure you want to quit?"),
+            ConfirmationScreen("Exit Application", "Are you sure you want to quit?"),
             lambda result: self.exit() if result else None
         )

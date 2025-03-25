@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from typing import List, Tuple
+from textual import on
 from textual.app import ComposeResult
 from textual.widgets import Button, Input, Label, ListView, ListItem
 from textual.containers import Container, Horizontal
@@ -232,14 +233,15 @@ class ConfirmationScreen(ModalScreen[bool]):
     }
     """
 
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, message: str = None) -> None:
         super().__init__()
         self.title = title
+        self.message = message or "Are you sure you want to continue?"
 
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             yield Label(self.title, id="question")
-            yield Label("Are you sure you want to exit?", id="message")
+            yield Label(self.message, id="message")
             with Horizontal(id="buttons"):
                 yield Button("Yes", variant="error", id="yes")
                 yield Button("No", variant="primary", id="no")

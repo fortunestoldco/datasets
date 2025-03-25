@@ -156,13 +156,7 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
 
     def filter_repositories(self, query: str) -> None:
         """Filter repositories based on the search query"""
-        if not query:
-            self._filtered_repositories = list(self._repositories)
-        else:
-            self._filtered_repositories = [repo for repo in self._repositories 
-                                         if query.lower() in repo['name'].lower() 
-                                         or query.lower() in repo['type'].lower() 
-                                         or query.lower() in repo.get('source', '').lower()]
+        self._filtered_repositories = [repo for repo in self._repositories if query.lower() in repo['name'].lower() or query.lower() in repo['type'].lower() or query.lower() in repo['source'].lower()]
         self.update_repo_list()
 
     @on(Input.Changed, "#search-bar")
@@ -189,24 +183,26 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
                     self._filtered_repositories = list(self._repositories)
                     # Update ListView
                     self.update_repo_list()
-                    from config import save_config
+                    # Update config
                     self.config['repositories'] = self._repositories
+                    from config import save_config
                     save_config(self.config)
 
         elif event.button.id == "remove":
             repo_list = self.query_one("#repo-list", ListView)
             selected = repo_list.index
             if selected is not None and 0 <= selected < len(self._filtered_repositories):
+                # Get the selected repository from filtered list
                 selected_repo = self._filtered_repositories[selected]
                 # Remove from internal list
-                if selected_repo in self._repositories:
-                    self._repositories.remove(selected_repo)
-                # Update internal lists
-                self._filtered_repositories = list(self._repositories)
+                self._repositories = [repo for repo in self._repositories if repo != selected_repo]
+                # Update filtered list
+                self._filtered_repositories = [repo for repo in self._filtered_repositories if repo != selected_repo]
                 # Update ListView
                 self.update_repo_list()
-                from config import save_config
+                # Update config
                 self.config['repositories'] = self._repositories
+                from config import save_config
                 save_config(self.config)
 
         elif event.button.id == "save":
@@ -381,24 +377,28 @@ class AutoTrainScreen(ModalScreen[Dict[str, Any]]):
             with Horizontal(id="buttons"):
                 yield Button("Train", id="train", variant="primary")
                 yield Button("Cancel", id="cancel", variant="error")
-                
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "train":
-            # Get values from all inputs
-            params = {
-                "model": self.query_one("#model", Input).value,
-                "project_name": self.query_one("#project_name", Input).value,
-                "data_path": self.query_one("#data_path", Input).value,
-                "train_split": self.query_one("#train_split", Input).value,
-                "text_column": self.query_one("#text_column", Input).value,
-                "chat_template": self.query_one("#chat_template", Input).value,
-                "epochs": self.query_one("#epochs", Input).value,
-                "batch_size": self.query_one("#batch_size", Input).value,
-                "lr": self.query_one("#lr", Input).value,
-                "peft": True,
-                "quantization": "int4",
-                "target_modules": "all-linear"
-            }
-            self.dismiss(params)
+            # Collect all input values
+            try:
+                params = {
+                    "model": self.query_one("#model", Input).value,
+                    "project_name": self.query_one("#project_name", Input).value,
+                    "data_path": self.query_one("#data_path", Input).value,
+                    "train_split": self.query_one("#train_split", Input).value,
+                    "text_column": self.query_one("#text_column", Input).value,
+                    "chat_template": self.query_one("#chat_template", Input).value,
+                    "epochs": int(self.query_one("#epochs", Input).value),
+                    "batch_size": int(self.query_one("#batch_size", Input).value),
+                    "lr": float(self.query_one("#lr", Input).value),
+                    "peft": True,
+                    "quantization": "int4",
+                    "target_modules": "all-linear"
+                }
+                self.dismiss(params)
+            except ValueError:
+                # Handle potential errors with conversions
+                self.app.notify("Invalid input values. Please check and try again.", severity="error")
         else:
             self.dismiss(None)
