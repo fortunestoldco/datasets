@@ -179,8 +179,12 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
                         "source": "github" if "github.com" in repo_name else "huggingface",
                         "num_files": 0  # Placeholder for number of files
                     })
+                    # Update internal lists
+                    self._filtered_repositories = list(self._repositories)
                     # Update ListView
                     self.update_repo_list()
+                    from config import save_config
+                    save_config(self.config)
 
         elif event.button.id == "remove":
             repo_list = self.query_one("#repo-list", ListView)
@@ -188,8 +192,12 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
             if selected is not None and 0 <= selected < len(self._filtered_repositories):
                 # Remove from internal list
                 del self._repositories[selected]
+                # Update internal lists
+                self._filtered_repositories = list(self._repositories)
                 # Update ListView
                 self.update_repo_list()
+                from config import save_config
+                save_config(self.config)
 
         elif event.button.id == "save":
             # Update config before saving
