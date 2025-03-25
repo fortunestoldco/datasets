@@ -14,10 +14,16 @@ import uuid
 import warnings
 import sys
 import multiprocessing
+import time  # Add for rate limit handling
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import List, Dict, Tuple, Any, Optional, Set, Union
 import logging
 from pathlib import Path
+import argparse
+import dotenv  # Add for environment variable support
+
+# Load environment variables
+dotenv.load_dotenv()
 
 # Set up logging
 logging.basicConfig(
@@ -234,25 +240,27 @@ class MessageDialog(ModalScreen):
         padding: 1 2;
         background: $surface;
         border: thick $primary;
+        margin: 1;
     }
 
     #title {
         width: 100%;
         margin-bottom: 1;
-        content-align: center middle;
         text-style: bold;
+        text-align: center;
     }
 
     #message {
         width: 100%;
         margin-bottom: 1;
-        content-align: center middle;
+        text-align: center;
     }
 
     #buttons {
         width: 100%;
         height: 3;
         align: center middle;
+        margin-top: 1;
     }
     """
 
@@ -285,17 +293,15 @@ class InputDialog(ModalScreen[str]):
         padding: 1 2;
         background: $surface;
         border: thick $primary;
+        margin: 1;
     }
 
     #question {
-        width: 100%;
-        height: auto;
+        text-align: center;
         margin-bottom: 1;
-        content-align: center middle;
     }
 
     #input {
-        width: 100%;
         margin-bottom: 1;
     }
 
@@ -303,6 +309,11 @@ class InputDialog(ModalScreen[str]):
         width: 100%;
         height: 3;
         align: center middle;
+        margin-top: 1;
+    }
+
+    Button {
+        margin: 0 1;
     }
     """
 
@@ -343,26 +354,24 @@ class SelectDialog(ModalScreen[str]):
         padding: 1 2;
         background: $surface;
         border: thick $primary;
+        margin: 1;
     }
 
     #title {
-        width: 100%;
+        text-align: center;
         margin-bottom: 1;
-        content-align: center middle;
         text-style: bold;
     }
 
     #subtitle {
-        width: 100%;
+        text-align: center;
         margin-bottom: 1;
-        content-align: center middle;
     }
 
     #options {
-        width: 100%;
         height: auto;
         max-height: 10;
-        margin-bottom: 1;
+        margin: 1;
         border: solid $panel;
     }
 
@@ -370,6 +379,11 @@ class SelectDialog(ModalScreen[str]):
         width: 100%;
         height: 3;
         align: center middle;
+        margin-top: 1;
+    }
+
+    Button {
+        margin: 0 1;
     }
     """
 
@@ -413,9 +427,7 @@ class ManageCredentialsScreen(ModalScreen[Dict[str, Any]]):
         padding: 1 2;
         background: $surface;
         border: thick $primary;
-        layout: grid;
-        grid-size: 1;
-        grid-gutter: 1;
+        margin: 1;
     }
 
     #title {
@@ -425,7 +437,7 @@ class ManageCredentialsScreen(ModalScreen[Dict[str, Any]]):
     }
 
     Label {
-        margin-bottom: 0.5;
+        margin-bottom: 1;
     }
 
     Input {
@@ -436,6 +448,11 @@ class ManageCredentialsScreen(ModalScreen[Dict[str, Any]]):
         width: 100%;
         height: 3;
         align: center middle;
+        margin-top: 1;
+    }
+
+    Button {
+        margin: 0 1;
     }
     """
 
@@ -478,9 +495,7 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
         padding: 1 2;
         background: $surface;
         border: thick $primary;
-        layout: grid;
-        grid-size: 1;
-        grid-gutter: 1;
+        margin: 1;
     }
 
     #title {
@@ -497,13 +512,14 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
     #repo-list {
         height: 10;
         border: solid $accent;
-        margin-bottom: 1;
+        margin: 1;
     }
 
     #buttons {
         width: 100%;
         height: 3;
         align: center middle;
+        margin-top: 1;
     }
 
     Button {
@@ -531,12 +547,22 @@ class ManageRepositoriesScreen(ModalScreen[Dict[str, Any]]):
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "add":
-            repo_name = await self.app.push_screen(InputDialog("Enter repository name:"))
+            repo_dialog = InputDialog("Enter repository name/URL:", "")
+            repo_name = await self.app.push_screen(repo_dialog)
             if repo_name:
-                # Add repository to config and update the list view
-                self.config['repositories'].append({"name": repo_name})
-                repo_list = self.query_one("#repo-list", ListView)
-                repo_list.append(ListItem(Label(repo_name)))
+                # Normalize repository name
+                repo_name = repo_name.strip()
+                if repo_name:
+                    # Add repository to config and update the list view
+                    self.config['repositories'].append({
+                        "name": repo_name,
+                        "type": "repository" if "/" in repo_name else "organization"
+                    })
+                    repo_list = self.query_one("#repo-list", ListView)
+                    repo_list.clear()
+                    # Refresh the entire list
+                    for repo in self.config['repositories']:
+                        repo_list.append(ListItem(Label(repo['name'])))
         elif event.button.id == "remove":
             # Get the selected item's index
             repo_list = self.query_one("#repo-list", ListView)
@@ -569,9 +595,7 @@ class ConfigureSettingsScreen(ModalScreen[Dict[str, Any]]):
         padding: 1 2;
         background: $surface;
         border: thick $primary;
-        layout: grid;
-        grid-size: 1;
-        grid-gutter: 1;
+        margin: 1;
     }
 
     #title {
@@ -581,7 +605,7 @@ class ConfigureSettingsScreen(ModalScreen[Dict[str, Any]]):
     }
 
     Label {
-        margin-bottom: 0.5;
+        margin-bottom: 1;
     }
 
     Input {
@@ -592,6 +616,7 @@ class ConfigureSettingsScreen(ModalScreen[Dict[str, Any]]):
         width: 100%;
         height: 3;
         align: center middle;
+        margin-top: 1;
     }
 
     Button {
@@ -647,9 +672,7 @@ class AutoTrainScreen(ModalScreen[Dict[str, Any]]):
         padding: 1 2;
         background: $surface;
         border: thick $primary;
-        layout: grid;
-        grid-size: 1;
-        grid-gutter: 1;
+        margin: 1;
     }
 
     #title {
@@ -659,7 +682,7 @@ class AutoTrainScreen(ModalScreen[Dict[str, Any]]):
     }
 
     Label {
-        margin-bottom: 0.5;
+        margin-bottom: 1;
     }
 
     Input {
@@ -670,6 +693,11 @@ class AutoTrainScreen(ModalScreen[Dict[str, Any]]):
         width: 100%;
         height: 3;
         align: center middle;
+        margin-top: 1;
+    }
+
+    Button {
+        margin: 0 1;
     }
     """
 
@@ -753,26 +781,30 @@ class ConfirmationScreen(ModalScreen[bool]):
     }
 
     #dialog {
-        grid-size: 1;
-        grid-gutter: 1;
-        padding: 1 2;
         width: 60;
-        height: 8;
-        border: thick $primary;
+        height: auto;
+        padding: 1 2;
         background: $surface;
+        border: thick $primary;
+        margin: 1;
     }
 
     #question {
-        width: 100%;
-        height: 3;
-        content-align: center middle;
+        text-align: center;
+        margin-bottom: 1;
         text-style: bold;
+    }
+
+    #message {
+        text-align: center;
+        margin-bottom: 1;
     }
 
     #buttons {
         width: 100%;
         height: 3;
         align: center middle;
+        margin-top: 1;
     }
 
     Button {
@@ -780,16 +812,17 @@ class ConfirmationScreen(ModalScreen[bool]):
     }
     """
 
-    def __init__(self, question: str) -> None:
+    def __init__(self, title: str) -> None:
         super().__init__()
-        self.question = question
+        self.title = title
 
     def compose(self) -> ComposeResult:
-        with Grid(id="dialog"):
-            yield Label(self.question, id="question")
+        with Container(id="dialog"):
+            yield Label(self.title, id="question")
+            yield Label("Are you sure you want to exit?", id="message")
             with Horizontal(id="buttons"):
-                yield Button("Yes", variant="success", id="yes")
-                yield Button("No", variant="error", id="no")
+                yield Button("Yes", variant="error", id="yes")
+                yield Button("No", variant="primary", id="no")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "yes":
@@ -1075,9 +1108,11 @@ class MainTUIApp(App[None]):
                         await self.push_screen(MessageDialog("Error", f"Error loading dataset: {str(e)}"))
 
         elif choice == "exit":
-            confirm = await self.push_screen(ConfirmationScreen("Are you sure you want to exit?"))
-            if confirm:
-                self.exit()
+            # Create a proper confirmation dialog
+            confirm_screen = ConfirmationScreen("Exit Application")
+            confirmed = await self.push_screen(confirm_screen)
+            if confirmed:
+                await self.action_quit()
 
     @work
     async def run_autotrain(self, params: Dict[str, Any]) -> bool:
@@ -1952,51 +1987,62 @@ def get_organization_repos_hf(organization: str, token: Optional[str] = None) ->
         logger.error(traceback.format_exc())
         return []
 
-def get_organization_repos_github(organization: str, token: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
-    Retrieve all repositories for a given organization from GitHub.
-
-    Args:
-        organization (str): The name of the organization on GitHub.
-        token (Optional[str]): GitHub API token for authentication.
-
-    Returns:
-        List[Dict[str, Any]]: A list of dictionaries containing repository information.
-    """
+def get_organization_repos_github(organization: str, token: Optional[str] = None, 
+                                retry_limit: int = 3, retry_delay: int = 60) -> List[Dict[str, Any]]:
+    """Enhanced version with better rate limit handling"""
     try:
-        # GitHub API request with authentication if token provided
         url = f"https://api.github.com/orgs/{organization}/repos?per_page=100"
         headers = {"Authorization": f"token {token}"} if token else {}
         repos = []
         page = 1
+        retries = 0
 
         with tqdm(desc=f"Fetching GitHub repositories for {organization}", unit="page") as pbar:
             while True:
-                response = requests.get(f"{url}&page={page}", headers=headers)
+                try:
+                    response = requests.get(f"{url}&page={page}", headers=headers)
 
-                if response.status_code == 403 and 'rate limit exceeded' in response.text.lower():
-                    tqdm.write("GitHub API rate limit exceeded. Please provide a GitHub token.")
-                    break
+                    if response.status_code == 403 and 'rate limit exceeded' in response.text.lower():
+                        if retries >= retry_limit:
+                            tqdm.write("GitHub API rate limit exceeded and retry limit reached.")
+                            break
+                        
+                        # Get reset time from headers
+                        reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
+                        wait_time = max(reset_time - time.time(), retry_delay)
+                        
+                        tqdm.write(f"Rate limit exceeded. Waiting {wait_time:.0f} seconds...")
+                        time.sleep(wait_time)
+                        retries += 1
+                        continue
 
-                if response.status_code != 200:
-                    tqdm.write(f"GitHub API returned status code {response.status_code}")
-                    break
+                    if response.status_code != 200:
+                        tqdm.write(f"GitHub API returned status code {response.status_code}")
+                        break
 
-                page_repos = response.json()
-                if not page_repos:
-                    break
+                    page_repos = response.json()
+                    if not page_repos:
+                        break
 
-                repos.extend(page_repos)
-                pbar.update(1)
-                pbar.set_description(f"Fetched {len(repos)} repositories (page {page})")
-                page += 1
+                    repos.extend(page_repos)
+                    pbar.update(1)
+                    pbar.set_description(f"Fetched {len(repos)} repositories (page {page})")
+                    page += 1
 
-                # Check if we've reached the last page
-                if 'next' not in response.links:
-                    break
+                    if 'next' not in response.links:
+                        break
+
+                except requests.RequestException as e:
+                    if retries >= retry_limit:
+                        tqdm.write(f"Error fetching repositories: {str(e)}")
+                        break
+                    time.sleep(retry_delay)
+                    retries += 1
+                    continue
 
         tqdm.write(f"Found {len(repos)} repositories for {organization} on GitHub.")
         return repos
+
     except Exception as e:
         tqdm.write(f"Error retrieving repositories for {organization} from GitHub: {str(e)}")
         logger.error(traceback.format_exc())
@@ -3154,25 +3200,130 @@ def organize_content(organization: str, output_dir: str, test_ratio: float = 0.2
     # Process the repositories
     return process_all_repositories(config)
 
-def main_tui():
-    """Main function with TUI interface."""
-    # Load or create configuration
-    config = load_or_create_config()
+def parse_arguments() -> argparse.Namespace:
+    """
+    Parse command line arguments.
 
-    # Process command line arguments
-    if len(sys.argv) > 1:
-        # TODO: Add command line argument handling (if needed)
-        pass
+    Returns:
+        argparse.Namespace: Parsed command line arguments
+    """
+    parser = argparse.ArgumentParser(
+        description='SDK Documentation Dataset Generator',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument('--no-tui', action='store_true', 
+                       help='Run in command line mode without TUI')
+    parser.add_argument('--org', type=str, 
+                       help='Organization to process')
+    parser.add_argument('--output', type=str, 
+                       default='./downloaded_docs',
+                       help='Output directory')
+    parser.add_argument('--test-ratio', type=float, 
+                       default=0.2,
+                       help='Test split ratio')
+    parser.add_argument('--github-token', type=str,
+                       default=os.getenv('GITHUB_TOKEN'),
+                       help='GitHub API token (or set GITHUB_TOKEN env var)')
+    parser.add_argument('--hf-token', type=str,
+                       default=os.getenv('HF_TOKEN'),
+                       help='Hugging Face API token (or set HF_TOKEN env var)')
+    parser.add_argument('--debug', action='store_true',
+                       help='Enable debug logging')
+    parser.add_argument('--retry-limit', type=int,
+                       default=3,
+                       help='Number of retries for API calls')
+    parser.add_argument('--retry-delay', type=int,
+                       default=60,
+                       help='Delay in seconds between retries')
+    return parser.parse_args()
 
-    # Main program loop
-    app = MainTUIApp(config)
-    app.run()
+def setup_logging(debug: bool = False) -> None:
+    """
+    Set up logging configuration.
 
-def main():
-    """Legacy main function (kept for backward compatibility)."""
-    print("Information: This script now uses a text-based user interface (TUI). Switching to TUI mode...")
+    Args:
+        debug (bool): Enable debug logging if True
+    """
+    log_level = logging.DEBUG if debug else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler("doc_downloader.log"),
+            logging.StreamHandler()
+        ]
+    )
 
-    main_tui()
+def main_tui() -> int:
+    """
+    Main function with TUI interface.
+
+    Returns:
+        int: Exit code (0 for success, non-zero for errors)
+    """
+    try:
+        # Parse arguments
+        args = parse_arguments()
+        
+        # Set up logging
+        setup_logging(args.debug)
+        
+        # Load or create configuration
+        config = load_or_create_config()
+        
+        # Update config with command line arguments if provided
+        if args.github_token:
+            config['github_token'] = args.github_token
+        if args.hf_token:
+            config['huggingface_token'] = args.hf_token
+        if args.output:
+            config['output_directory'] = args.output
+        if args.test_ratio:
+            config['test_ratio'] = args.test_ratio
+            
+        # If organization is provided via command line, add it to repositories
+        if args.org:
+            config['repositories'].append({
+                'type': 'organization',
+                'name': args.org,
+                'source': 'github'
+            })
+            
+        # Save updated config
+        save_config(config)
+        
+        # If no-tui flag is set and org is provided, run in command line mode
+        if args.no_tui and args.org:
+            logger.info(f"Running in command line mode for organization: {args.org}")
+            result = process_all_repositories(config)
+            return 0 if result else 1
+            
+        # Otherwise, start TUI
+        app = MainTUIApp(config)
+        app.run()
+        return 0
+        
+    except KeyboardInterrupt:
+        logger.info("Program interrupted by user")
+        return 130
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+        logger.debug(traceback.format_exc())
+        return 1
+
+def main() -> int:
+    """
+    Legacy main function (kept for backward compatibility).
+    
+    Returns:
+        int: Exit code (0 for success, non-zero for errors)
+    """
+    try:
+        print("Information: This script now uses a text-based user interface (TUI). Switching to TUI mode...")
+        return main_tui()
+    except Exception as e:
+        print(f"Fatal error: {str(e)}")
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
